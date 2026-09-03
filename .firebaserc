@@ -1,6 +1,7 @@
 {
   "projects": {
-    "default": "practicefactureia"
+    "default": "practicefactureia",
+    "Proyect": "practicefactureia"
   },
   "targets": {},
   "etags": {}
