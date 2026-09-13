@@ -19,7 +19,7 @@
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:5001/practicefactureia/us-central1/api";
 
-const ESPERAS_REINTENTO_MS = [4000, 6000, 10000];
+const ESPERAS_REINTENTO_MS = [3000, 5000, 8000, 12000, 18000, 25000];
 
 function esperar(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
