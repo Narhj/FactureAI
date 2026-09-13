@@ -1,36 +1,57 @@
 // ==========================================================
-// FactureAI - Servicios web del proyecto
+// FactureAI - Backend para Render.com
 // Evidencia GA8-220501096-AA1-EV02 (Modulos integrados)
 // Autor: Moises David Florez Olivero
 // ----------------------------------------------------------
-// Esta version parte del backend construido en GA7-220501096-AA5-EV01/EV03
-// y actualiza el modulo de Autenticacion para que coincida con el mockup
-// de Registro/Login construido en Readdy.ai (GA8-AA1-EV02):
+// CAMBIO DE ARQUITECTURA (documentado honestamente en la evidencia):
+// Firebase Cloud Functions exige el plan de pago Blaze (con tarjeta
+// registrada) incluso para uso gratuito. Como el proyecto sigue una
+// filosofia de "todo gratis" para el cliente final, se decidio mover
+// el HOSTING del backend a Render.com (gratis, sin tarjeta).
 //
-//   - El identificador de cada usuario pasa de "usuario" a "correo".
-//   - El registro ahora pide nombres, apellidos, cedula y fecha de
-//     nacimiento (ademas de correo y contrasena).
-//   - Se agrega un modulo de Perfil (GET/PUT) para que la pestana
-//     "Configuracion > Perfil" del frontend pueda leer y editar esos datos.
+// La base de datos NO cambia: sigue siendo Firestore, el mismo
+// proyecto de Firebase (practicefactureia). Lo unico que cambia es
+// donde corre el codigo de Express: antes en una Cloud Function,
+// ahora en un servidor normal de Node en Render.
 //
-// Los modulos de Proyectos y Facturas (GA7-220501096-AA5-EV03) NO cambian:
-// siguen expuestos para que el backend conserve todo lo ya aprobado.
+// Por eso este archivo es casi identico a functions/index.js (que se
+// conserva para seguir probando localmente con el emulador), con dos
+// diferencias puntuales:
+//   1. No se usa "firebase-functions": el servidor se levanta con
+//      app.listen(), como cualquier API de Express.
+//   2. La conexion a Firestore se autentica con una cuenta de
+//      servicio (service account), porque fuera de la infraestructura
+//      de Google ya no hay credenciales automaticas.
 // ==========================================================
 
-const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const cors = require("cors");
 
-admin.initializeApp();
+// ----------------------------------------------------------
+// Credenciales de Firestore (cuenta de servicio)
+// La variable de entorno FIREBASE_SERVICE_ACCOUNT debe contener el
+// JSON completo de la cuenta de servicio (como texto). Se configura
+// en Render, nunca se sube al repositorio.
+// ----------------------------------------------------------
+if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
+  console.error(
+    "Falta la variable de entorno FIREBASE_SERVICE_ACCOUNT. " +
+      "Sin ella el servidor no puede conectarse a Firestore."
+  );
+  process.exit(1);
+}
+
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
 const db = getFirestore();
 
 const app = express();
-// Habilita CORS para que el frontend (en otro puerto/origen) pueda llamar
-// esta API desde el navegador. Postman no necesitaba esto porque Postman
-// no aplica la politica de mismo origen que sí aplican los navegadores.
 app.use(cors({ origin: true }));
 app.use(express.json());
 
@@ -40,9 +61,14 @@ const facturasCollection = db.collection("facturas");
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Ruta raiz: sirve para que Render confirme que el servicio esta vivo,
+// y para "despertarlo" manualmente si hace falta.
+app.get("/", (req, res) => {
+  res.status(200).json({ estado: "ok", mensaje: "FactureAI API activa." });
+});
+
 // ==========================================================
-// Modulo de Autenticacion (actualizado en GA8-220501096-AA1-EV02)
-// Identificador: correo electronico (antes: nombre de usuario).
+// Modulo de Autenticacion (igual que en functions/index.js)
 // ==========================================================
 
 app.post("/register", async (req, res) => {
@@ -120,7 +146,6 @@ app.post("/login", async (req, res) => {
     const userDoc = await usersCollection.doc(correoNormalizado).get();
 
     if (!userDoc.exists) {
-      // Mensaje generico a proposito: no revela si el correo existe o no.
       return res.status(401).json({
         estado: "error",
         mensaje: "Error en la autenticacion.",
@@ -156,12 +181,9 @@ app.post("/login", async (req, res) => {
 });
 
 // ==========================================================
-// Modulo de Perfil (nuevo en GA8-220501096-AA1-EV02)
-// Respalda la pestana "Configuracion > Perfil" del frontend.
-// No expone passwordHash en ninguna respuesta.
+// Modulo de Perfil
 // ==========================================================
 
-// GET /perfil/:correo - Consultar los datos de perfil de un usuario
 app.get("/perfil/:correo", async (req, res) => {
   try {
     const correoNormalizado = String(req.params.correo).trim().toLowerCase();
@@ -189,8 +211,6 @@ app.get("/perfil/:correo", async (req, res) => {
   }
 });
 
-// PUT /perfil/:correo - Editar nombres, apellidos, cedula o fecha de nacimiento
-// El correo (identificador) y la contrasena NO se cambian por esta via.
 app.put("/perfil/:correo", async (req, res) => {
   try {
     const correoNormalizado = String(req.params.correo).trim().toLowerCase();
@@ -234,10 +254,9 @@ app.put("/perfil/:correo", async (req, res) => {
 });
 
 // ==========================================================
-// Modulo de Proyectos (GA7-220501096-AA5-EV03) - sin cambios
+// Modulo de Proyectos (sin cambios de logica, GA7-220501096-AA5-EV03)
 // ==========================================================
 
-// POST /proyectos - Crear un proyecto nuevo
 app.post("/proyectos", async (req, res) => {
   try {
     const { nombre, cliente, descripcion } = req.body;
@@ -273,7 +292,6 @@ app.post("/proyectos", async (req, res) => {
   }
 });
 
-// GET /proyectos - Listar todos los proyectos
 app.get("/proyectos", async (req, res) => {
   try {
     const snapshot = await proyectosCollection.orderBy("creadoEn", "desc").get();
@@ -293,7 +311,6 @@ app.get("/proyectos", async (req, res) => {
   }
 });
 
-// GET /proyectos/:id - Ver el detalle de un proyecto
 app.get("/proyectos/:id", async (req, res) => {
   try {
     const doc = await proyectosCollection.doc(req.params.id).get();
@@ -318,7 +335,6 @@ app.get("/proyectos/:id", async (req, res) => {
   }
 });
 
-// PUT /proyectos/:id - Editar un proyecto existente
 app.put("/proyectos/:id", async (req, res) => {
   try {
     const docRef = proyectosCollection.doc(req.params.id);
@@ -353,7 +369,6 @@ app.put("/proyectos/:id", async (req, res) => {
   }
 });
 
-// DELETE /proyectos/:id - Eliminar un proyecto
 app.delete("/proyectos/:id", async (req, res) => {
   try {
     const docRef = proyectosCollection.doc(req.params.id);
@@ -382,10 +397,9 @@ app.delete("/proyectos/:id", async (req, res) => {
 });
 
 // ==========================================================
-// Modulo de Facturas (GA7-220501096-AA5-EV03) - sin cambios
+// Modulo de Facturas (sin cambios de logica, GA7-220501096-AA5-EV03)
 // ==========================================================
 
-// POST /facturas - Ingreso manual de una factura
 app.post("/facturas", async (req, res) => {
   try {
     const { proveedor, numero, monto, fecha, proyectoId } = req.body;
@@ -397,7 +411,6 @@ app.post("/facturas", async (req, res) => {
       });
     }
 
-    // Verificamos que el proyecto asociado exista.
     const proyectoDoc = await proyectosCollection.doc(proyectoId).get();
     if (!proyectoDoc.exists) {
       return res.status(404).json({
@@ -412,7 +425,7 @@ app.post("/facturas", async (req, res) => {
       monto,
       fecha: fecha || new Date().toISOString(),
       proyectoId,
-      origen: "manual", // distingue de las que llegaran por WhatsApp/n8n
+      origen: "manual",
       estado: "registrada",
       creadoEn: FieldValue.serverTimestamp(),
     };
@@ -433,7 +446,6 @@ app.post("/facturas", async (req, res) => {
   }
 });
 
-// GET /facturas - Listar todas las facturas
 app.get("/facturas", async (req, res) => {
   try {
     const snapshot = await facturasCollection.orderBy("creadoEn", "desc").get();
@@ -453,7 +465,6 @@ app.get("/facturas", async (req, res) => {
   }
 });
 
-// GET /facturas/:id - Ver el detalle de una factura
 app.get("/facturas/:id", async (req, res) => {
   try {
     const doc = await facturasCollection.doc(req.params.id).get();
@@ -478,7 +489,6 @@ app.get("/facturas/:id", async (req, res) => {
   }
 });
 
-// GET /proyectos/:id/facturas - Facturas de un proyecto especifico
 app.get("/proyectos/:id/facturas", async (req, res) => {
   try {
     const proyectoDoc = await proyectosCollection.doc(req.params.id).get();
@@ -512,8 +522,9 @@ app.get("/proyectos/:id/facturas", async (req, res) => {
 });
 
 // ----------------------------------------------------------
-// Exponemos la app de Express como una unica Cloud Function.
-// Misma funcion "api" de evidencias anteriores, ahora con el
-// modulo de Autenticacion actualizado y Perfil agregado.
+// Render asigna el puerto por la variable de entorno PORT.
 // ----------------------------------------------------------
-exports.api = functions.https.onRequest(app);
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`FactureAI API escuchando en el puerto ${PORT}`);
+});

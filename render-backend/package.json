@@ -1,0 +1,18 @@
+{
+  "name": "factureai-backend-render",
+  "description": "Backend de FactureAI para Render.com (Evidencia GA8-220501096-AA1-EV02)",
+  "main": "index.js",
+  "engines": {
+    "node": "18.x"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "firebase-admin": "^12.1.0"
+  },
+  "private": true
+}
